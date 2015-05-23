@@ -53,8 +53,8 @@ end
 # Before mapping, grow the file to sufficient size
 # Note: a few mappable streams do not support lseek. When Julia
 # supports structures in ccall, switch to fstat.
-grow!(::AnonymousMmap,o::FileOffset,l::Integer) = return
-function grow!(io::IO, offset::FileOffset, len::Integer)
+grow!(::AnonymousMmap,o::Integer,l::Integer) = return
+function grow!(io::IO, offset::Integer, len::Integer)
     pos = position(io)
     filelen = filesize(io)
     if filelen < offset + len
