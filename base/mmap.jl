@@ -90,13 +90,9 @@ settings(io::IO) = Ptr{Cwchar_t}(C_NULL), isreadonly(io), true
 end # @windows_only
 
 # core impelementation of mmap
-type Array{T,N} <: AbstractArray{T,N}
+immutable Array{T,N} <: AbstractArray{T,N}
     array::Base.Array{T,N} # array with data from memory-mapped region
-    ptr::Ptr{Void}         # pointer to start of memory-mapped data; doesn't necessarily correspond to start of array; page-aligned
-    handle::Ptr{Void}      # only needed on windows for additional file mapping object handle
-    isreadable::Bool
     iswritable::Bool
-    mmaplen::Int           # total length of memory-mapped region; doesn't necessarily correspond to length(array); not page-aligned
 
     function Mmap.Array{T,N}(::Type{T}, io::IO, dims::NTuple{N,Integer}=(filesize(io),), offset::Integer=position(io); grow::Bool=true, shared::Bool=true)
         # check inputs
@@ -121,7 +117,6 @@ type Array{T,N} <: AbstractArray{T,N}
             # mmap the file
             ptr = ccall(:jl_mmap, Ptr{Void}, (Ptr{Void}, Csize_t, Cint, Cint, Cint, FileOffset), C_NULL, mmaplen, prot, flags, file_desc, offset_page)
             systemerror("memory mapping failed", reinterpret(Int,ptr) == -1)
-            handle = C_NULL
         end # @unix_only
 
         @windows_only begin
@@ -139,8 +134,13 @@ type Array{T,N} <: AbstractArray{T,N}
         end # @windows_only
         # convert mmapped region to Julia Array at `ptr + (offset - offset_page)` since file was mapped at offset_page
         A = pointer_to_array(convert(Ptr{T}, UInt(ptr) + UInt(offset - offset_page)), dims)
-        array = new{T,N}(A, ptr, handle, isreadable(io), iswritable(io), Int(mmaplen))
-        finalizer(array,close)
+        array = new{T,N}(A, iswritable(io))
+        @unix_only finalizer(A, x -> systemerror("munmap", ccall(:munmap,Cint,(Ptr{Void},Int),ptr,mmaplen) != 0))
+        @windows_only finalizer(A, x -> begin
+            status = ccall(:UnmapViewOfFile, stdcall, Cint, (Ptr{Void},), ptr)!=0
+            status |= ccall(:CloseHandle, stdcall, Cint, (Ptr{Void},), handle)!=0
+            status || error("could not unmap view: $(Base.FormatMessage())")
+        end)
         return array
     end
 end
@@ -164,21 +164,8 @@ Mmap.Array(file::AbstractString, len::Integer=filesize(file), offset::Integer=In
 Mmap.Array{T,N}(::Type{T}, dims::NTuple{N,Integer}; shared::Bool=true) = Mmap.Array(T, AnonymousMmap(), dims, Int64(0); shared=shared)
 Mmap.Array{T}(::Type{T}, d::Integer...; shared::Bool=true) = Mmap.Array(T,convert(Tuple{Vararg{Int}}, d); shared=shared)
 
-function Base.close(m::Mmap.Array)
-    if m.isreadable || m.iswritable
-        m.isreadable = false; m.iswritable = false
-        @unix_only systemerror("munmap", ccall(:munmap,Cint,(Ptr{Void},Int),m.ptr,m.mmaplen) != 0)
-        @windows_only begin
-            status = ccall(:UnmapViewOfFile, stdcall, Cint, (Ptr{Void},), m.ptr)!=0
-            status |= ccall(:CloseHandle, stdcall, Cint, (Ptr{Void},), m.handle)!=0
-            status || error("could not unmap view: $(Base.FormatMessage())")
-        end
-    end
-    return
-end
-
 Base.iswritable(m::Mmap.Array) = m.iswritable
-Base.isreadable(m::Mmap.Array) = m.isreadable
+Base.isreadable(m::Mmap.Array) = true
 
 # Array interface
 Base.linearindexing{T<:Mmap.Array}(::Type{T}) = Base.LinearFast()
@@ -196,15 +183,14 @@ Base.similar{T}(a::Mmap.Array{T,2}, S)          = Mmap.Array(S, size(a,1), size(
 Base.zeros{T}(::Type{T}, dims::Dims) = Mmap.Array(T, dims)
 Base.zeros{T}(::Type{T}, m::Int)     = Mmap.Array(T, m)
 
-const READERROR  = ArgumentError("mapped-memory is not readable")
-Base.getindex(S::Mmap.Array) = isreadable(S) ? getindex(S.array) : throw(READERROR)
-Base.getindex(S::Mmap.Array, I::Real) = isreadable(S) ? getindex(S.array, I) : throw(READERROR)
-Base.getindex(S::Mmap.Array, I::AbstractArray) = isreadable(S) ? getindex(S.array, I) : throw(READERROR)
+Base.getindex(S::Mmap.Array) = getindex(S.array)
+Base.getindex(S::Mmap.Array, I::Real) = getindex(S.array, I)
+Base.getindex(S::Mmap.Array, I::AbstractArray) = getindex(S.array, I)
 @generated function Base.getindex(S::Mmap.Array, I::Union(Real,AbstractVector)...)
     N = length(I)
     Isplat = Expr[:(I[$d]) for d = 1:N]
     quote
-        isreadable(S) ? getindex(S.array, $(Isplat...)) : throw(READERROR)
+        getindex(S.array, $(Isplat...))
     end
 end
 
