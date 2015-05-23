@@ -58,7 +58,7 @@ function grow!(io::IO, offset::FileOffset, len::Integer)
     pos = position(io)
     filelen = filesize(io)
     if filelen < offset + len
-        write(io, zeros(UInt8,(offset + len) - filelen))
+        write(io, Base.zeros(UInt8,(offset + len) - filelen))
         flush(io)
     end
     seek(io, pos)
