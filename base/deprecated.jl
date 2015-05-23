@@ -599,3 +599,7 @@ function mmap_bitarray{N}(dims::NTuple{N,Integer}, s::IO, offset::FileOffset)
     return B
 end
 mmap_bitarray{N}(::Type{Bool}, dims::NTuple{N,Integer}, s::IO, offset::FileOffset=position(s)) = mmap_bitarray(dims, s, offset)
+
+# 11379
+
+@deprecate utf32(c::Integer...)   UTF32String(UInt32[c...,0])
