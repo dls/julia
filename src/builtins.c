@@ -1271,7 +1271,7 @@ size_t jl_static_show_x(JL_STREAM *out, jl_value_t *v, int depth)
         n += jl_static_show_x(out, (jl_value_t*)li->module, depth);
         if (li->specTypes) {
             n += jl_printf(out, ".");
-            n += jl_show_svec(out, li->specTypes->parameters, li->name->name);
+            n += jl_show_svec(out, li->specTypes->parameters, li->name->name, "(", ")");
         }
         else {
             n += jl_printf(out, ".%s(?)", li->name->name);
